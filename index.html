@@ -1,0 +1,874 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>CHROMIA</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@700;800;900&display=swap" rel="stylesheet">
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  :root {
+    --bg: #ffffff; --ink: #000000; --ink-mid: #444444; --ink-soft: #888888;
+    --border: #dedede; --radius: 10px;
+    --transition: 0.45s cubic-bezier(0.25,0.46,0.45,0.94);
+    --font: 'Inter', Arial Black, Arial, sans-serif;
+  }
+  html, body { height:100%; width:100%; overflow:hidden; background:var(--bg); color:var(--ink); font-family:var(--font); -webkit-font-smoothing:antialiased; }
+  #app { display:flex; flex-direction:column; height:100dvh; width:100%; overflow:hidden; }
+
+  /* Header */
+  #header { flex-shrink:0; height:44px; padding:0 20px; display:flex; align-items:center; justify-content:space-between; border-bottom:1.5px solid var(--border); background:var(--bg); z-index:10; }
+  #wordmark { font-size:12px; font-weight:900; letter-spacing:0.18em; text-transform:uppercase; }
+  #tagline  { font-size:10px; font-weight:700; letter-spacing:0.08em; color:var(--ink-soft); text-transform:uppercase; }
+
+  /* Camera stage */
+  #stage { flex-shrink:0; position:relative; width:100%; height:38dvh; overflow:hidden; background:#111; }
+  /* CHANGED (v1l): selector broadened from just #camera-feed to also cover
+     the new #stream-img element (network MJPEG source), so both source
+     types share identical positioning/sizing/object-fit/transition rules. */
+  #camera-feed, #stream-img { position:absolute; inset:0; width:100%; height:100%; object-fit:cover; display:none; opacity:0; transition:opacity 0.35s ease; }
+  #camera-feed.active, #stream-img.active { display:block; opacity:1; }
+  canvas#sample-canvas { display:none; }
+
+  /* Swatch row */
+  #swatch-row { position:absolute; top:50%; left:50%; transform:translate(-50%,-50%); display:flex; align-items:center; gap:16px; z-index:5; }
+  #swatch-wrap { position:relative; width:min(36vw,160px); height:min(36vw,160px); flex-shrink:0; }
+  #swatch { width:100%; height:100%; border-radius:50%; background:#a2cffe; transition:background-color var(--transition); box-shadow:0 0 0 1px rgba(0,0,0,0.1),0 6px 24px rgba(0,0,0,0.15); }
+  #swatch.pop { animation:swatch-pop 0.35s cubic-bezier(0.34,1.56,0.64,1); }
+  @keyframes swatch-pop { 0%{transform:scale(1)} 50%{transform:scale(1.06)} 100%{transform:scale(1)} }
+
+  /* Crosshair — child of swatch-wrap */
+  #crosshair { position:absolute; top:50%; left:50%; transform:translate(-50%,-50%); width:44px; height:44px; pointer-events:none; display:none; z-index:10; }
+  #crosshair.active { display:block; }
+  #crosshair::before, #crosshair::after { content:''; position:absolute; background:rgba(255,255,255,0.9); border-radius:2px; }
+  #crosshair::before { width:2px; height:44px; left:50%; top:0; transform:translateX(-50%); }
+  #crosshair::after  { width:44px; height:2px; top:50%; left:0; transform:translateY(-50%); }
+  #crosshair-ring { position:absolute; top:50%; left:50%; transform:translate(-50%,-50%); width:62px; height:62px; pointer-events:none; display:none; z-index:10; }
+  #crosshair-ring.active { display:block; }
+  #crosshair-ring::before, #crosshair-ring::after { content:''; position:absolute; width:14px; height:14px; border-color:rgba(255,255,255,0.9); border-style:solid; }
+  #crosshair-ring::before { top:0; left:0; border-width:2px 0 0 2px; }
+  #crosshair-ring::after  { bottom:0; right:0; border-width:0 2px 2px 0; }
+
+  /* Compare swatch */
+  #compare-col { display:flex; flex-direction:column; align-items:center; gap:5px; flex-shrink:0; }
+  #compare-swatch { width:min(12vw,54px); height:min(12vw,54px); border-radius:50%; background:#a2cffe; transition:background-color var(--transition); box-shadow:0 0 0 1px rgba(0,0,0,0.1),0 3px 10px rgba(0,0,0,0.12); }
+  #compare-label { font-size:8px; font-weight:800; letter-spacing:0.1em; color:#fff; text-shadow:0 1px 3px rgba(0,0,0,0.6); text-transform:uppercase; text-align:center; line-height:1.3; }
+
+  /* Scrollable results */
+  #results { flex:1; overflow-y:auto; overflow-x:hidden; -webkit-overflow-scrolling:touch; background:var(--bg); padding:10px 16px 8px; display:flex; flex-direction:column; gap:8px; }
+
+  /* Result card */
+  #result-card { width:100%; border:1.5px solid var(--border); border-radius:var(--radius); overflow:hidden; }
+  .result-section { padding:9px 13px; border-bottom:1px solid var(--border); display:flex; flex-direction:column; gap:3px; }
+  .result-section:last-child { border-bottom:none; }
+  .section-label { font-size:8px; font-weight:900; letter-spacing:0.16em; color:var(--ink-soft); text-transform:uppercase; }
+  .val-hex { font-size:20px; font-weight:900; letter-spacing:0.04em; color:var(--ink); text-transform:uppercase; }
+  .val-row { font-size:12px; font-weight:800; letter-spacing:0.02em; color:var(--ink-mid); line-height:1.5; }
+  .colour-name { font-size:20px; font-weight:900; color:var(--ink); text-transform:capitalize; line-height:1.15; }
+  #mix-badge { display:block; width:fit-content; margin-top:2px; padding:4px 14px; border-radius:100px; background:var(--ink); color:var(--bg); font-size:10px; font-weight:900; letter-spacing:0.1em; text-transform:uppercase; }
+  #mix-tip { font-size:11px; font-weight:700; color:var(--ink-soft); line-height:1.5; margin-top:2px; }
+  .pantone-note { font-size:10px; font-weight:700; color:var(--ink-soft); font-style:italic; margin-top:2px; line-height:1.4; }
+
+  /* Chips */
+  #chip-row { display:flex; justify-content:center; gap:6px; flex-wrap:wrap; flex-shrink:0; }
+  .chip { font-size:9px; font-weight:900; letter-spacing:0.08em; color:var(--ink-mid); border:2px solid var(--border); border-radius:100px; padding:3px 10px; text-transform:uppercase; }
+  #status-bar { text-align:center; font-size:11px; font-weight:700; color:var(--ink-soft); min-height:14px; flex-shrink:0; }
+
+  /* Bottom bar */
+  #bottom-bar { flex-shrink:0; background:var(--bg); border-top:1.5px solid var(--border); padding:8px 16px 14px; display:flex; flex-direction:column; gap:8px; z-index:10; }
+  #mode-bar { display:flex; justify-content:center; gap:6px; }
+  .mode-btn { padding:6px 16px; font-size:10px; font-weight:900; letter-spacing:0.12em; text-transform:uppercase; border:2px solid var(--border); border-radius:100px; background:transparent; color:var(--ink-soft); cursor:pointer; transition:all 0.2s ease; -webkit-tap-highlight-color:transparent; outline:none; }
+  .mode-btn.active { background:var(--ink); color:var(--bg); border-color:var(--ink); }
+
+  #input-area { width:100%; }
+  #panel-camera { display:flex; flex-direction:column; align-items:center; gap:6px; }
+  #btn-capture { width:52px; height:52px; border-radius:50%; border:3px solid var(--ink); background:transparent; cursor:pointer; display:flex; align-items:center; justify-content:center; -webkit-tap-highlight-color:transparent; outline:none; }
+  #btn-capture::after { content:''; width:34px; height:34px; border-radius:50%; background:var(--ink); display:block; transition:transform 0.12s ease; }
+  #btn-capture:active::after { transform:scale(0.86); }
+  #camera-hint { font-size:11px; font-weight:700; color:var(--ink-soft); text-align:center; }
+
+  #panel-describe { display:none; flex-direction:column; gap:6px; }
+  #panel-hex      { display:none; flex-direction:column; gap:6px; }
+  .input-row { display:flex; gap:8px; align-items:center; }
+  .text-input { flex:1; height:42px; border:2px solid var(--border); border-radius:var(--radius); padding:0 14px; font-family:var(--font); font-size:14px; font-weight:700; color:var(--ink); background:var(--bg); outline:none; transition:border-color 0.2s ease; -webkit-appearance:none; }
+  .text-input:focus { border-color:var(--ink); }
+  .text-input::placeholder { color:var(--ink-soft); font-weight:700; }
+  #hex-picker { width:42px; height:42px; border-radius:var(--radius); border:2px solid var(--border); padding:3px; cursor:pointer; background:transparent; outline:none; -webkit-appearance:none; flex-shrink:0; }
+  .go-btn { height:42px; padding:0 16px; border-radius:var(--radius); border:none; background:var(--ink); color:var(--bg); font-family:var(--font); font-size:11px; font-weight:900; letter-spacing:0.1em; text-transform:uppercase; cursor:pointer; transition:opacity 0.15s ease; -webkit-tap-highlight-color:transparent; outline:none; flex-shrink:0; }
+  .go-btn:active { opacity:0.7; }
+  .describe-hint { font-size:10px; font-weight:700; color:var(--ink-soft); text-align:center; }
+
+  /* NEW (v1l): unobtrusive text-link style for the "Source" toggle,
+     built from the same design tokens as the rest of the app rather
+     than importing another project's button style. */
+  .link-btn { background:none; border:none; font-family:var(--font); font-size:9px; font-weight:900; letter-spacing:0.1em; text-transform:uppercase; color:var(--ink-soft); cursor:pointer; padding:4px 0; -webkit-tap-highlight-color:transparent; outline:none; }
+  .link-btn:active { opacity:0.6; }
+  #source-type-select { flex:0 0 118px; }
+</style>
+</head>
+<body>
+<div id="app">
+  <div id="header">
+    <span id="wordmark">Chromia</span>
+    <span id="tagline">Artist Colour Tool</span>
+  </div>
+  <div id="stage">
+    <video id="camera-feed" autoplay playsinline muted></video>
+    <!-- NEW (v1l): network-stream source (IP Webcam / DroidCam). Plain
+         <img> loading an MJPEG stream — no getUserMedia, no permission
+         prompt, no secure-context requirement, so this works on mobile
+         Brave even where getUserMedia is blocked (same fix applied to
+         gridli_pov after the same wall was hit there). -->
+    <img id="stream-img" alt="">
+    <canvas id="sample-canvas"></canvas>
+    <div id="swatch-row">
+      <div id="swatch-wrap">
+        <div id="swatch"></div>
+        <div id="crosshair"></div>
+        <div id="crosshair-ring"></div>
+      </div>
+      <div id="compare-col">
+        <div id="compare-swatch"></div>
+        <span id="compare-label">Closest<br>Named</span>
+      </div>
+    </div>
+  </div>
+  <div id="results">
+    <div id="result-card">
+      <div class="result-section">
+        <span class="section-label">Sampled Colour</span>
+        <span class="val-hex" id="sampled-hex">#A2CFFE</span>
+        <span class="val-row" id="val-rgb">RGB — 162, 207, 254</span>
+        <span class="val-row" id="val-hsl">HSL — 210°  98%  82%</span>
+        <span class="val-row" id="val-cmyk">CMYK — 36, 19, 0, 0</span>
+      </div>
+      <div class="result-section">
+        <span class="section-label">Closest Named Colour</span>
+        <span class="colour-name" id="colour-name">Baby Blue</span>
+        <span class="val-row" id="xkcd-hex">#A2CFFE</span>
+      </div>
+      <div class="result-section">
+        <span class="section-label">Closest RAL Classic</span>
+        <span class="colour-name" id="ral-name">Light Blue</span>
+        <span class="val-row" id="ral-code">RAL 5012</span>
+      </div>
+      <div class="result-section">
+        <span class="section-label">Artist Mix Guide</span>
+        <span id="mix-badge">Pure Match</span>
+        <span id="mix-tip">Start with this colour directly on your palette — it's a very close match.</span>
+        <span class="pantone-note">For Pantone matching, use the HEX / CMYK values above as your starting reference.</span>
+      </div>
+    </div>
+    <div id="chip-row"></div>
+    <div id="status-bar"></div>
+  </div>
+  <div id="bottom-bar">
+    <div id="mode-bar">
+      <button class="mode-btn active" data-mode="camera">Camera</button>
+      <button class="mode-btn" data-mode="describe">Describe</button>
+      <button class="mode-btn" data-mode="hex">Hex</button>
+    </div>
+    <div id="input-area">
+      <div id="panel-camera">
+        <!-- NEW (v1l): network camera source row, hidden until toggled -->
+        <div id="camera-source-row" class="input-row" style="display:none;">
+          <select id="source-type-select" class="text-input">
+            <option value="browser">Browser Camera</option>
+            <option value="ipwebcam">IP Webcam</option>
+            <option value="droidcam">DroidCam</option>
+          </select>
+          <input id="stream-address" class="text-input" type="text" placeholder="192.168.1.42:8080" disabled maxlength="60">
+          <button class="go-btn" id="stream-connect-btn" disabled>Go</button>
+        </div>
+        <button id="btn-capture" aria-label="Sample colour"></button>
+        <span id="camera-hint">Point at a surface · tap to sample</span>
+        <button id="source-toggle-btn" class="link-btn">📡 Source</button>
+      </div>
+      <div id="panel-describe">
+        <div class="input-row">
+          <input id="describe-input" class="text-input" type="text" placeholder="e.g. muddy door, electric sky, dusty rose wall…" maxlength="80">
+          <button class="go-btn" id="describe-go">Find</button>
+        </div>
+        <span class="describe-hint">Any word, adjective, phrase, or mood</span>
+      </div>
+      <div id="panel-hex">
+        <div class="input-row">
+          <input id="hex-picker" type="color" value="#a2cffe" title="Pick colour">
+          <input id="hex-input" class="text-input" type="text" placeholder="#a2cffe" maxlength="7">
+          <button class="go-btn" id="hex-go">Name</button>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+<script>
+/* ═══════════════════════════════════════════════════
+   CHROMIA v1l
+   - "Noun" tab renamed to "Describe"
+   - Lookup table massively expanded with adjectives,
+     adverbs, descriptive phrases, combo terms
+   - Partial + multi-word phrase matching
+   - NEW: 📡 Source panel in Camera mode — adds IP Webcam
+     and DroidCam as alternate picture sources alongside
+     the original getUserMedia browser camera. Routes
+     around Brave/Android blocking getUserMedia on
+     file:// pages (same fix built for gridli_pov).
+     Sampling math unchanged — center-pixel sampling on
+     object-fit:cover is unaffected by source swap.
+═══════════════════════════════════════════════════ */
+
+/* ── XKCD dataset ── */
+const XKCD=[
+  [162,207,254,"baby blue"],[255,255,255,"white"],[0,0,0,"black"],[255,0,0,"red"],[0,128,0,"green"],[0,0,255,"blue"],
+  [255,255,0,"yellow"],[255,165,0,"orange"],[128,0,128,"purple"],[255,192,203,"pink"],[165,42,42,"brown"],[128,128,128,"grey"],
+  [0,255,255,"cyan"],[255,0,255,"magenta"],[0,100,0,"dark green"],[0,0,128,"navy blue"],[128,0,0,"dark red"],[255,215,0,"gold"],
+  [192,192,192,"silver"],[255,127,80,"coral"],[64,224,208,"turquoise"],[255,249,208,"butter yellow"],[83,151,131,"dusty teal"],
+  [93,188,210,"sky blue"],[207,115,67,"burnt orange"],[195,144,212,"soft purple"],[120,180,60,"apple green"],
+  [255,111,82,"watermelon"],[104,1,42,"wine"],[117,169,169,"cadet blue"],[255,164,0,"amber"],[206,179,139,"tan"],
+  [131,153,155,"steel blue"],[161,57,5,"rust"],[255,253,116,"canary yellow"],[216,173,212,"light purple"],
+  [1,101,252,"bright blue"],[20,41,4,"forest green"],[93,94,48,"army green"],[127,43,10,"chocolate brown"],
+  [167,95,24,"caramel"],[255,176,124,"peach"],[171,91,93,"dusty rose"],[63,130,157,"muted blue"],[148,119,6,"dark yellow"],
+  [125,25,75,"berry"],[235,200,178,"pale peach"],[109,90,207,"medium purple"],[88,15,65,"plum"],
+  [117,187,253,"cornflower blue"],[145,9,81,"raspberry"],[103,143,39,"avocado"],[249,188,8,"golden yellow"],
+  [255,228,94,"dandelion"],[135,85,137,"purplish"],[207,253,188,"light green"],[255,148,8,"bright orange"],
+  [168,228,160,"sage green"],[78,134,4,"grass green"],[95,92,43,"olive drab"],[4,2,115,"dark navy"],[0,209,205,"aqua"],
+  [182,106,80,"terracotta"],[148,166,23,"pea green"],[206,162,253,"light lavender"],[74,1,0,"maroon"],
+  [176,221,22,"lime green"],[238,145,13,"mustard"],[20,3,186,"cobalt blue"],[137,130,20,"dark khaki"],[196,166,97,"khaki"],
+  [0,177,177,"teal"],[100,84,3,"dark olive"],[191,241,40,"yellow green"],[255,127,1,"pumpkin orange"],
+  [88,169,37,"medium green"],[1,63,156,"ocean blue"],[140,20,252,"vivid purple"],[150,0,86,"dark pink"],
+  [3,193,74,"bright green"],[59,68,75,"gunmetal"],[144,228,193,"seafoam"],[205,89,9,"burnt sienna"],
+  [165,176,194,"steel grey"],[255,200,151,"apricot"],[120,72,42,"sienna"],[5,167,2,"leaf green"],[130,95,135,"mauve"],
+  [254,119,16,"pumpkin"],[91,192,235,"light blue"],[105,105,105,"dim grey"],[222,88,66,"red orange"],[205,253,2,"lime"],
+  [152,239,249,"light cyan"],[178,145,187,"light mauve"],[227,200,255,"pale lavender"],[243,115,216,"pink purple"],
+  [150,110,189,"purpley"],[210,235,222,"pale mint"],[218,134,4,"goldenrod"],[253,147,200,"baby pink"],
+  [119,0,6,"blood red"],[233,8,130,"hot pink"],[1,149,41,"irish green"],[85,211,217,"bright teal"],
+  [0,123,167,"ocean"],[123,178,116,"sage"],[118,255,122,"bright lime green"],[50,120,168,"steel blue"],
+  [167,240,112,"light lime"],[220,113,80,"salmon"],[114,211,252,"pale sky blue"],[109,130,70,"olive green"],
+  [42,229,255,"aqua blue"],[88,107,196,"periwinkle"],[224,5,255,"electric purple"],[90,134,173,"muted blue"],
+  [228,217,188,"sand"],[248,5,42,"strawberry"],[191,144,22,"dark gold"],[245,249,227,"off white"],
+  [255,91,165,"bubblegum pink"],[195,232,229,"light teal"],[172,1,198,"purple"],[90,90,90,"charcoal"],
+  [229,17,1,"fire engine red"],[155,183,212,"dusty blue"],[166,126,0,"dark mustard"],[255,163,72,"light orange"],
+  [126,30,156,"grape"],[204,255,101,"lime yellow"],[60,200,150,"medium aquamarine"],[2,75,1,"bottle green"],
+  [88,168,249,"cornflower"],[162,191,254,"periwinkle blue"],[220,2,121,"deep pink"],[6,82,255,"electric blue"],
+  [252,162,28,"orange yellow"],[151,40,0,"dark orange"],[247,252,27,"lemon yellow"],[140,4,4,"dark maroon"],
+  [163,22,120,"cranberry"],[186,190,100,"dark beige"],[140,255,219,"seafoam green"],[94,145,125,"green grey"],
+  [148,72,0,"rust brown"],[155,255,233,"light aqua"],[127,78,30,"dirt brown"],[255,148,117,"light coral"],
+  [74,139,86,"fern green"],[2,128,111,"dark cyan"],[255,233,34,"sunflower yellow"],[173,247,109,"light lime green"],
+  [0,64,7,"hunter green"],[183,10,250,"bright purple"],[14,184,151,"jade"],[83,0,130,"dark purple"],
+  [182,255,115,"light green"],[1,31,70,"dark navy blue"],[235,22,102,"cerise"],[76,106,199,"cornflower blue"],
+  [255,254,122,"pale yellow"],[247,175,18,"marigold"],[101,176,93,"medium green"],[105,44,17,"chocolate"],
+  [133,186,248,"light periwinkle"],[3,7,100,"midnight blue"],[180,255,192,"pale green"],[0,46,0,"dark forest green"],
+  [253,255,191,"light yellow"],[255,203,82,"pastel yellow"],[0,143,156,"teal blue"],[254,160,29,"mango"],
+  [203,161,252,"light violet"],[3,57,248,"royal blue"],[255,82,200,"bubblegum"],[154,14,234,"bright purple"],
+  [106,226,236,"pale blue"],[255,94,2,"blood orange"],[127,204,189,"light teal"],[97,222,42,"bright lime"],
+  [197,254,199,"pale mint"],[255,192,0,"golden"],[255,36,0,"scarlet"],[0,97,104,"dark teal"],
+  [135,124,99,"warm grey"],[249,134,155,"light pink"],[118,76,34,"umber"],[0,255,157,"spring green"],
+  [255,187,120,"tan orange"],[255,63,52,"tomato red"],[69,118,255,"medium blue"],[179,254,255,"ice blue"],
+  [149,151,252,"periwinkle"],[170,0,2,"dark red"],[85,181,153,"green blue"],[185,255,243,"pale cyan"],
+  [0,36,255,"true blue"],[22,1,89,"dark indigo"],[145,254,203,"mint green"],[130,202,252,"pale blue"],
+  [114,2,132,"eggplant"],[123,95,75,"warm brown"],[2,200,255,"dodger blue"],[254,204,255,"pale pink"],
+  [4,148,0,"medium green"],[153,117,112,"rosy brown"],[0,164,255,"cerulean blue"],[96,42,0,"dark brown"],
+  [253,198,1,"golden yellow"],[174,113,252,"light purple"],[247,163,4,"butterscotch"],[255,166,43,"yellow orange"],
+  [162,252,140,"light lime"],[216,130,252,"orchid"],[0,72,0,"dark green"],[219,13,136,"hot pink"],
+  [195,177,252,"lavender blue"],[1,1,51,"midnight"],[139,247,208,"seafoam"],[255,127,212,"pink"],
+  [126,113,0,"dark olive"],[243,214,4,"sunshine yellow"],[232,23,218,"fuchsia"],[192,247,222,"pale aqua"],
+  [108,0,50,"wine red"],[198,252,255,"light sky blue"],[136,252,170,"pale green"],[255,143,0,"dark orange"],
+  [105,5,161,"violet"],[193,96,255,"amethyst"],[254,229,0,"lemon"],[219,84,97,"rose"],[4,3,172,"dark blue"],
+  [252,179,139,"light salmon"],[1,216,214,"light teal"],[2,156,34,"forest"],[0,24,220,"bright blue"],
+  [4,150,130,"dark aqua"],[201,120,255,"violet"],[154,230,255,"light blue"],[207,253,122,"lime"],
+  [255,203,54,"pastel orange"],[137,35,0,"brick red"],[0,247,172,"spearmint"],[192,193,192,"light grey"],
+  [198,248,255,"pale sky blue"],[254,92,0,"blood orange"],[211,155,52,"tan brown"],[160,210,252,"sky blue"],
+  [0,255,66,"neon green"],[241,183,195,"pastel pink"],[210,210,210,"silver"],[137,252,60,"light lime green"],
+  [202,1,71,"dark rose"],[148,208,255,"baby blue"],[253,253,253,"off white"],[224,224,224,"light grey"],
+  [33,161,87,"green"],[255,147,38,"golden orange"],[169,2,47,"deep red"],[44,200,147,"sea green"],
+  [219,253,255,"pale cyan"],[161,68,0,"rust orange"],[252,1,1,"bright red"],[159,159,159,"medium grey"],
+  [200,152,247,"light violet"],[4,244,137,"emerald"],[255,159,0,"orange yellow"],[133,0,255,"electric purple"],
+  [136,1,100,"magenta"],[7,255,196,"medium aquamarine"],[0,108,0,"dark green"],[255,25,40,"vivid red"],
+  [93,255,196,"aquamarine"],[236,113,1,"dark orange"],[199,255,183,"pale lime"],[119,105,255,"periwinkle"],
+  [228,143,252,"light orchid"],[255,115,170,"hot pink"],[185,251,164,"mint"],[239,181,255,"lilac"],
+  [0,12,116,"dark blue"],[252,172,237,"pink lavender"],[0,117,255,"azure blue"],[255,84,48,"orange red"],
+  [149,0,250,"grape purple"],[171,235,198,"pale sage"],[96,1,168,"indigo"],[182,9,139,"magenta"],
+  [147,255,208,"aqua green"],[2,63,2,"dark forest green"],[255,70,38,"tomato"],[85,255,163,"mint green"],
+  [255,190,100,"peach orange"],[252,255,232,"off white"],[255,102,170,"pink"],[128,255,174,"sea green"],
+  [116,166,98,"sage green"],[119,148,255,"light periwinkle"],[251,166,254,"orchid"],[252,130,74,"light orange"],
+  [153,253,255,"pale blue"],[230,108,2,"orange"],[163,204,5,"light olive"],[149,213,178,"seafoam"],
+  [201,200,255,"pale periwinkle"],[235,254,240,"mint cream"],[180,111,252,"violet purple"],[255,223,77,"golden"],
+  [185,179,255,"lavender grey"],[2,174,238,"blue"],[255,52,1,"red orange"],[255,236,209,"buff"],
+  [112,134,154,"steel blue"],[138,94,142,"muted purple"],[53,185,9,"medium green"],[228,100,14,"burnt orange"],
+  [252,251,244,"cream"],[0,56,255,"royal blue"],[153,133,255,"soft periwinkle"],[0,79,0,"bottle green"],
+  [85,107,47,"dark olive green"],[107,142,35,"olive drab"],[154,205,50,"yellow green"],
+  [72,209,204,"medium turquoise"],[95,158,160,"cadet blue"],[70,130,180,"steel blue"],
+  [100,149,237,"cornflower blue"],[30,144,255,"dodger blue"],[0,191,255,"deep sky blue"],
+  [135,206,250,"light sky blue"],[173,216,230,"light blue"],[176,196,222,"light steel blue"],
+  [106,90,205,"slate blue"],[72,61,139,"dark slate blue"],[65,105,225,"royal blue"],
+  [0,0,205,"medium blue"],[0,0,139,"dark blue"],[0,0,128,"navy"],[25,25,112,"midnight blue"],
+  [138,43,226,"blue violet"],[148,0,211,"dark violet"],[153,50,204,"dark orchid"],
+  [186,85,211,"medium orchid"],[218,112,214,"orchid"],[221,160,221,"plum"],[238,130,238,"violet"],
+  [216,191,216,"thistle"],[255,20,147,"deep pink"],[255,105,180,"hot pink"],[255,182,193,"light pink"],
+  [219,112,147,"pale violet red"],[220,20,60,"crimson"],[178,34,34,"firebrick"],[205,92,92,"indian red"],
+  [240,128,128,"light coral"],[255,99,71,"tomato"],[255,69,0,"orange red"],[255,140,0,"dark orange"],
+  [250,128,114,"salmon"],[255,160,122,"light salmon"],[218,165,32,"goldenrod"],[184,134,11,"dark goldenrod"],
+  [189,183,107,"dark khaki"],[240,230,140,"khaki"],[255,255,224,"light yellow"],[255,250,205,"lemon chiffon"],
+  [255,239,213,"papaya whip"],[255,228,196,"bisque"],[255,222,173,"navajo white"],[245,222,179,"wheat"],
+  [222,184,135,"burlywood"],[188,143,143,"rosy brown"],[244,164,96,"sandy brown"],[205,133,63,"peru"],
+  [210,105,30,"chocolate"],[139,69,19,"saddle brown"],[160,82,45,"sienna"],[0,128,128,"teal"],
+  [0,139,139,"dark cyan"],[0,206,209,"dark turquoise"],[127,255,212,"aquamarine"],[152,251,152,"pale green"],
+  [143,188,143,"dark sea green"],[60,179,113,"medium sea green"],[46,139,87,"sea green"],
+  [34,139,34,"forest green"],[50,205,50,"lime green"],[124,252,0,"lawn green"],[127,255,0,"chartreuse"],
+  [173,255,47,"green yellow"],[128,128,0,"olive"],[169,169,169,"dark gray"],[211,211,211,"light gray"],
+  [220,220,220,"gainsboro"],[245,245,245,"white smoke"],[112,128,144,"slate gray"],
+  [119,136,153,"light slate gray"],[47,79,79,"dark slate gray"],[36,36,36,"raisin black"],
+  [54,69,79,"charcoal"],[80,80,80,"graphite"],
+];
+
+/* ── RAL Classic ── */
+const RAL=[
+  [155,36,35,"RAL 3000","Flame Red"],[165,32,25,"RAL 3001","Signal Red"],[162,35,29,"RAL 3002","Carmine Red"],
+  [200,90,30,"RAL 3003","Ruby Red"],[118,24,15,"RAL 3004","Purple Red"],[94,20,30,"RAL 3005","Wine Red"],
+  [38,22,25,"RAL 3007","Black Red"],[100,35,25,"RAL 3009","Oxide Red"],[188,80,60,"RAL 3011","Brown Red"],
+  [212,122,103,"RAL 3012","Beige Red"],[165,32,25,"RAL 3013","Tomato Red"],[210,65,48,"RAL 3014","Antique Pink"],
+  [232,145,138,"RAL 3015","Light Pink"],[193,40,27,"RAL 3016","Coral Red"],[200,55,45,"RAL 3017","Rose"],
+  [215,80,70,"RAL 3018","Strawberry Red"],[195,60,50,"RAL 3020","Traffic Red"],[215,80,70,"RAL 3022","Salmon Pink"],
+  [197,60,48,"RAL 3027","Raspberry Red"],[228,60,40,"RAL 3028","Pure Red"],
+  [255,165,0,"RAL 2000","Yellow Orange"],[225,100,0,"RAL 2001","Red Orange"],[235,115,0,"RAL 2002","Vermilion"],
+  [240,110,20,"RAL 2003","Pastel Orange"],[225,90,0,"RAL 2004","Pure Orange"],[218,100,0,"RAL 2008","Bright Red Orange"],
+  [245,130,0,"RAL 2009","Traffic Orange"],[215,95,0,"RAL 2010","Signal Orange"],[228,108,10,"RAL 2011","Deep Orange"],
+  [220,120,10,"RAL 2012","Salmon Orange"],
+  [240,210,40,"RAL 1000","Green Beige"],[237,200,0,"RAL 1001","Beige"],[205,175,0,"RAL 1002","Sand Yellow"],
+  [235,185,0,"RAL 1003","Signal Yellow"],[220,180,0,"RAL 1004","Golden Yellow"],[200,160,0,"RAL 1005","Honey Yellow"],
+  [210,170,30,"RAL 1006","Maize Yellow"],[235,195,0,"RAL 1007","Daffodil Yellow"],[175,130,0,"RAL 1011","Brown Beige"],
+  [240,220,50,"RAL 1013","Oyster White"],[235,210,15,"RAL 1014","Ivory"],[235,215,150,"RAL 1015","Light Ivory"],
+  [240,225,40,"RAL 1016","Sulfur Yellow"],[245,200,0,"RAL 1017","Saffron Yellow"],[245,215,20,"RAL 1018","Zinc Yellow"],
+  [245,200,15,"RAL 1021","Rape Yellow"],[240,185,0,"RAL 1023","Traffic Yellow"],[240,200,0,"RAL 1024","Ochre Yellow"],
+  [255,225,0,"RAL 1028","Melon Yellow"],[235,180,0,"RAL 1034","Pastel Yellow"],
+  [65,130,60,"RAL 6000","Patina Green"],[60,120,55,"RAL 6001","Emerald Green"],[55,110,50,"RAL 6002","Leaf Green"],
+  [70,125,50,"RAL 6003","Olive Green"],[30,60,30,"RAL 6004","Blue Green"],[35,75,35,"RAL 6005","Moss Green"],
+  [30,50,30,"RAL 6007","Bottle Green"],[20,50,25,"RAL 6008","Brown Green"],[30,60,35,"RAL 6009","Fir Green"],
+  [90,145,80,"RAL 6010","Grass Green"],[95,155,85,"RAL 6011","Reseda Green"],[50,65,50,"RAL 6012","Black Green"],
+  [80,140,70,"RAL 6013","Reed Green"],[115,175,100,"RAL 6017","May Green"],[70,150,75,"RAL 6018","Yellow Green"],
+  [185,220,160,"RAL 6019","Pastel Green"],[65,95,60,"RAL 6021","Pale Green"],[100,170,90,"RAL 6024","Traffic Green"],
+  [75,130,70,"RAL 6025","Fern Green"],[135,195,120,"RAL 6027","Light Green"],[40,90,50,"RAL 6028","Pine Green"],
+  [20,65,35,"RAL 6029","Mint Green"],[0,80,55,"RAL 6032","Signal Green"],[80,145,100,"RAL 6034","Pastel Turquoise"],
+  [40,100,145,"RAL 5000","Violet Blue"],[0,80,135,"RAL 5001","Green Blue"],[0,75,130,"RAL 5002","Ultramarine Blue"],
+  [0,60,110,"RAL 5003","Sapphire Blue"],[25,50,90,"RAL 5004","Black Blue"],[0,90,150,"RAL 5005","Signal Blue"],
+  [50,110,155,"RAL 5007","Brillant Blue"],[30,55,95,"RAL 5008","Grey Blue"],[0,75,130,"RAL 5009","Azure Blue"],
+  [0,80,135,"RAL 5010","Gentian Blue"],[20,35,75,"RAL 5011","Steel Blue"],[70,145,200,"RAL 5012","Light Blue"],
+  [30,65,110,"RAL 5013","Cobalt Blue"],[30,55,95,"RAL 5014","Pigeon Blue"],[30,60,100,"RAL 5015","Sky Blue"],
+  [0,60,100,"RAL 5017","Traffic Blue"],[0,75,130,"RAL 5018","Turquoise Blue"],[35,80,130,"RAL 5019","Capri Blue"],
+  [0,80,135,"RAL 5020","Ocean Blue"],[45,100,150,"RAL 5021","Water Blue"],[0,50,90,"RAL 5022","Night Blue"],
+  [0,90,155,"RAL 5023","Distant Blue"],[90,155,195,"RAL 5024","Pastel Blue"],
+  [130,65,130,"RAL 4001","Red Lilac"],[150,60,125,"RAL 4002","Red Violet"],[130,45,100,"RAL 4003","Heather Violet"],
+  [100,40,90,"RAL 4004","Claret Violet"],[80,35,75,"RAL 4005","Blue Lilac"],[105,50,100,"RAL 4006","Traffic Purple"],
+  [50,25,55,"RAL 4007","Purple Violet"],[105,55,105,"RAL 4008","Signal Violet"],[155,100,155,"RAL 4009","Pastel Violet"],
+  [100,50,100,"RAL 4010","Telemagenta"],
+  [210,180,150,"RAL 8001","Ochre Brown"],[155,90,60,"RAL 8002","Signal Brown"],[110,60,40,"RAL 8003","Clay Brown"],
+  [85,50,35,"RAL 8004","Copper Brown"],[90,55,35,"RAL 8007","Fawn Brown"],[90,55,30,"RAL 8008","Olive Brown"],
+  [55,35,25,"RAL 8011","Nut Brown"],[60,40,25,"RAL 8012","Red Brown"],[55,35,20,"RAL 8015","Chestnut Brown"],
+  [50,35,25,"RAL 8016","Mahogany Brown"],[40,25,15,"RAL 8017","Chocolate Brown"],[45,30,20,"RAL 8019","Grey Brown"],
+  [165,120,80,"RAL 8023","Orange Brown"],[165,120,75,"RAL 8024","Beige Brown"],[110,80,50,"RAL 8025","Pale Brown"],
+  [80,50,30,"RAL 8028","Terra Brown"],
+  [250,250,250,"RAL 9001","Cream"],[215,215,215,"RAL 9002","Grey White"],[235,235,230,"RAL 9003","Signal White"],
+  [25,25,25,"RAL 9004","Signal Black"],[15,15,15,"RAL 9005","Jet Black"],[165,165,165,"RAL 9006","White Aluminium"],
+  [140,140,140,"RAL 9007","Grey Aluminium"],[35,35,35,"RAL 9011","Graphite Black"],
+  [245,245,240,"RAL 9016","Traffic White"],[220,220,215,"RAL 9010","Pure White"],
+  [200,200,195,"RAL 9018","Papyrus White"],[30,30,30,"RAL 9021","Tar Black"],
+  [125,125,125,"RAL 7000","Squirrel Grey"],[120,130,130,"RAL 7001","Silver Grey"],[115,120,120,"RAL 7002","Olive Grey"],
+  [110,115,110,"RAL 7003","Moss Grey"],[135,140,130,"RAL 7004","Signal Grey"],[90,95,90,"RAL 7005","Mouse Grey"],
+  [100,105,100,"RAL 7006","Beige Grey"],[80,80,75,"RAL 7008","Khaki Grey"],[95,95,90,"RAL 7009","Green Grey"],
+  [90,90,95,"RAL 7010","Tarpaulin Grey"],[85,90,90,"RAL 7011","Iron Grey"],[70,75,75,"RAL 7012","Basalt Grey"],
+  [80,80,80,"RAL 7013","Brown Grey"],[55,60,60,"RAL 7015","Slate Grey"],[145,150,145,"RAL 7016","Anthracite Grey"],
+  [125,130,125,"RAL 7021","Black Grey"],[140,145,140,"RAL 7023","Concrete Grey"],[145,150,145,"RAL 7024","Graphite Grey"],
+  [155,160,155,"RAL 7026","Granite Grey"],[155,155,150,"RAL 7030","Stone Grey"],[160,165,160,"RAL 7031","Blue Grey"],
+  [155,155,150,"RAL 7032","Pebble Grey"],[120,125,120,"RAL 7033","Cement Grey"],[100,100,95,"RAL 7035","Light Grey"],
+  [115,115,110,"RAL 7036","Platinum Grey"],[95,95,90,"RAL 7037","Dusty Grey"],[90,90,85,"RAL 7038","Agate Grey"],
+  [85,85,80,"RAL 7039","Quartz Grey"],[130,135,130,"RAL 7040","Window Grey"],[125,130,125,"RAL 7042","Traffic Grey A"],
+  [130,130,125,"RAL 7043","Traffic Grey B"],[120,120,115,"RAL 7045","Telegrey 1"],
+];
+
+/* ── Expanded describe/word/phrase map ──
+   Nouns + adjectives + adverbs + phrases + combos
+────────────────────────────────────────────────── */
+const WORDS=[
+  /* ── Adjectives: light quality ── */
+  ["pale","#d9d9d9"],["light","#d0d8e0"],["faded","#c8c0b0"],["washed","#c0b8a8"],["washed out","#c8c0b0"],
+  ["bleached","#e8e4d8"],["chalky","#e8e4dc"],["soft","#d8d0c8"],["muted","#a09888"],["subdued","#988880"],
+  ["subtle","#b8b0a0"],["delicate","#ddd8d0"],["dim","#888880"],["hazy","#c0b8b0"],["misty","#c8d0d4"],
+  ["foggy","#b8b8b8"],["cloudy","#b0b0b0"],["milky","#f0ece4"],["creamy","#fff8e8"],["powdery","#e0d8d0"],
+  /* ── Adjectives: dark quality ── */
+  ["dark","#2a2a2a"],["deep","#1a1a2a"],["rich","#3a1a0a"],["intense","#2a0a0a"],["strong","#1a1a1a"],
+  ["bold","#cc0000"],["vivid","#ff3300"],["vibrant","#ff4400"],["saturated","#e83000"],["pure","#ff0000"],
+  ["inky","#0a0a18"],["sooty","#1a1818"],["smoky","#606060"],["shadowy","#282830"],["murky","#3a3830"],
+  /* ── Adjectives: warm ── */
+  ["warm","#e08040"],["hot","#ff3300"],["fiery","#ff4400"],["glowing","#ff8800"],["toasty","#c87840"],
+  ["golden","#ffc200"],["sunny","#ffe066"],["radiant","#ffcc00"],["blazing","#ff4400"],["scorched","#c06030"],
+  ["amber","#ffb300"],["honeyed","#e8a020"],["caramel","#c68642"],["tawny","#a06030"],["burnished","#b07830"],
+  /* ── Adjectives: cool ── */
+  ["cool","#6090c0"],["cold","#a0c8e0"],["icy","#c8eeff"],["frozen","#b8ddf0"],["arctic","#d8eef8"],
+  ["crisp","#e0f4f8"],["fresh","#98fb98"],["glacial","#c8e8f8"],["chilly","#b0c8d8"],["frosty","#d6eef8"],
+  /* ── Adjectives: earthy/natural ── */
+  ["earthy","#8b4513"],["muddy","#6b4c3a"],["dirty","#7a5a40"],["dusty","#b8a890"],["sandy","#f0c070"],
+  ["gritty","#9a8870"],["rusty","#b7410e"],["mossy","#6b8e23"],["mossy green","#6b8e23"],["leafy","#3a7a2a"],
+  ["woody","#a0522d"],["barky","#7a4a28"],["peaty","#5a4030"],["chalky white","#f0ece4"],["stony","#909080"],
+  ["gravelly","#888878"],["clayey","#a06040"],["silty","#c0a870"],["loamy","#7a5838"],["ashy","#b8b8b8"],
+  /* ── Adjectives: metallic/shiny ── */
+  ["metallic","#a8a8a8"],["shiny","#d0d8d8"],["glossy","#c8d0d0"],["polished","#c0c8c8"],["chrome","#c8c8c8"],
+  ["silvery","#c0c0c0"],["golden","#ffd700"],["coppery","#b87333"],["brassy","#b5a642"],["bronzy","#cd7f32"],
+  ["iridescent","#b0c8d8"],["pearlescent","#f0ece4"],["lustrous","#d0c8b8"],
+  /* ── Adjectives: transparent/opacity ── */
+  ["translucent","#d0e8f0"],["transparent","#e8f4f8"],["clear","#e0f0f8"],["glassy","#b0c8d0"],
+  /* ── Moods/emotions ── */
+  ["calm","#b0c4de"],["peaceful","#b0e0e6"],["serene","#add8e6"],["tranquil","#a8d8e8"],
+  ["cheerful","#ffd700"],["joyful","#ffcc00"],["happy","#ffe066"],["playful","#ff6b6b"],
+  ["melancholy","#607080"],["sad","#708090"],["gloomy","#4a5060"],["moody","#5a5068"],
+  ["mysterious","#2a1a3a"],["eerie","#1a1828"],["spooky","#2a2038"],["haunting","#3a2848"],
+  ["romantic","#ff8099"],["passionate","#cc0033"],["dramatic","#8b0000"],["intense","#cc0000"],
+  ["elegant","#2c2c54"],["luxurious","#d4af37"],["regal","#4169e1"],["royal","#4169e1"],
+  ["rustic","#a0522d"],["vintage","#c8a078"],["antique","#c0a07a"],["aged","#b09070"],["weathered","#9a8870"],
+  ["modern","#808080"],["sleek","#606060"],["minimal","#f0f0f0"],["clean","#f5f5f5"],
+  /* ── Texture descriptors ── */
+  ["rough","#908878"],["smooth","#d0c8c0"],["grainy","#c0b8a8"],["velvet","#720058"],["silky","#f0e8d8"],
+  ["matte","#909090"],["flat","#a8a8a8"],["raw","#b09070"],["coarse","#907868"],
+  /* ── Combo phrases — object + adjective ── */
+  ["muddy water","#7a6040"],["muddy brown","#6b4c3a"],["muddy green","#5a6040"],["muddy door","#7a5838"],
+  ["dusty rose","#c08080"],["dusty blue","#9ab0c0"],["dusty pink","#d0a0a0"],["dusty grey","#b0a898"],
+  ["dusty purple","#9080a0"],["dusty orange","#c09060"],["dusty teal","#709090"],
+  ["burnt orange","#cc5500"],["burnt red","#8b2500"],["burnt yellow","#d4a017"],["burnt sienna","#e97451"],
+  ["burnt wood","#5a3020"],["burnt umber","#8a3324"],
+  ["rusty red","#b7410e"],["rusty orange","#c05010"],["rusty metal","#9a4020"],
+  ["electric blue","#0050ff"],["electric green","#00ff44"],["electric yellow","#ffff00"],
+  ["electric purple","#8000ff"],["electric pink","#ff0080"],["electric orange","#ff5500"],
+  ["neon green","#39ff14"],["neon pink","#ff6ec7"],["neon yellow","#ffff00"],["neon orange","#ff6600"],
+  ["neon blue","#1b03a3"],["neon purple","#cf00ff"],
+  ["pastel pink","#f4b8c1"],["pastel blue","#aec6cf"],["pastel green","#77dd77"],
+  ["pastel yellow","#fdfd96"],["pastel purple","#b39eb5"],["pastel orange","#ffb347"],
+  ["deep ocean","#006994"],["deep blue","#00008b"],["deep red","#8b0000"],["deep green","#006400"],
+  ["deep purple","#301934"],["deep brown","#4a2800"],["deep black","#0a0a0a"],
+  ["dark forest","#228b22"],["dark sky","#1a1a3a"],["dark water","#1a3a4a"],["dark earth","#3a2010"],
+  ["pale blue","#d0e8ff"],["pale green","#c8f0c8"],["pale yellow","#ffffc0"],["pale pink","#ffd0d8"],
+  ["pale grey","#e0e0e0"],["pale gold","#f0e090"],["pale lavender","#e8e0f0"],
+  ["warm grey","#9a8a80"],["warm white","#fff8f0"],["warm brown","#8b5a2b"],["warm yellow","#ffcc44"],
+  ["warm orange","#ff8040"],["warm red","#c04040"],
+  ["cool grey","#808898"],["cool blue","#6090b0"],["cool green","#60a080"],["cool white","#f0f4f8"],
+  ["wet stone","#707870"],["wet sand","#c8a860"],["wet grass","#3a6a30"],["wet wood","#5a4030"],["wet concrete","#808878"],
+  ["dry sand","#e8c878"],["dry earth","#a07848"],["dry grass","#c8b060"],["dry wood","#c09060"],
+  ["old brick","#b04030"],["old wood","#8a6040"],["old paper","#e8d8a8"],["old gold","#c8a030"],["old rose","#c08080"],
+  ["new leaf","#78c050"],["new wood","#d0a870"],
+  ["bright red","#ff0000"],["bright blue","#0000ff"],["bright green","#00cc00"],["bright yellow","#ffff00"],
+  ["bright orange","#ff8800"],["bright pink","#ff69b4"],["bright purple","#8800ff"],
+  ["faded blue","#8090a0"],["faded red","#c08080"],["faded green","#809080"],["faded yellow","#d8d090"],
+  ["faded pink","#d0a8a8"],["faded grey","#c0b8b0"],
+  ["stormy grey","#5a6070"],["stormy blue","#3a5070"],["stormy sky","#4a5060"],["stormy sea","#3a5060"],
+  ["morning sky","#c8e0f8"],["evening sky","#e87040"],["night sky","#0a0a2a"],["midday sky","#5090d0"],
+  ["autumn leaf","#c86020"],["autumn red","#b03010"],["autumn orange","#c87020"],["autumn gold","#c8a020"],
+  ["spring green","#78c050"],["spring pink","#f0a0b0"],["summer blue","#4090d0"],["winter white","#f0f0f8"],
+  ["ocean blue","#006994"],["ocean green","#1a6a60"],["ocean grey","#6a8090"],["ocean foam","#d0e8e0"],
+  ["forest green","#228b22"],["forest floor","#5a4030"],["forest mist","#8a9888"],
+  ["mountain grey","#808870"],["mountain blue","#6070a0"],["mountain snow","#f0f4f8"],
+  ["desert sand","#e8c068"],["desert orange","#d07030"],["desert rose","#c07060"],
+  ["smoke grey","#909090"],["smoke blue","#7080a0"],["charcoal grey","#36454f"],
+  ["slate grey","#708090"],["slate blue","#6a809a"],["slate green","#607870"],
+  ["olive green","#6b8e23"],["olive drab","#6b6b3a"],["olive brown","#7a6030"],
+  ["stone grey","#909080"],["stone blue","#7080a0"],["stone green","#708070"],
+  ["ink blue","#1a2a6a"],["ink black","#0a0a14"],["ink green","#0a3a20"],
+  ["blood red","#8b0000"],["blood orange","#cc3300"],
+  ["sky blue","#87ceeb"],["sky grey","#a0b0c0"],["sky pink","#ffb7c5"],
+  ["grass green","#4a7c3f"],["grass yellow","#c8c050"],
+  ["brick red","#cb4154"],["brick orange","#c06030"],
+  ["copper red","#b87333"],["copper green","#4a7a50"],["copper brown","#8b5a2b"],
+  ["jade green","#00a36c"],["jade grey","#6a8880"],
+  ["mint green","#98fb98"],["mint blue","#9adce8"],["mint grey","#b0c8c0"],
+  ["rose gold","#b76e79"],["rose pink","#ff90a0"],["rose red","#c04060"],["rose grey","#c0a8a8"],
+  ["lavender blue","#9090d0"],["lavender grey","#c0b8d0"],["lavender pink","#e0a8d0"],
+  ["teal blue","#007080"],["teal green","#008070"],["teal grey","#709090"],
+  ["navy blue","#001f5b"],["navy grey","#3a4a6a"],
+  ["ivory white","#fffff0"],["ivory yellow","#f0e8c0"],
+  ["ebony black","#3d2b1f"],["ebony brown","#2a1a10"],
+  ["pearl white","#f0ece4"],["pearl grey","#d0c8c0"],["pearl pink","#f0d8d8"],
+  ["champagne","#f7e7ce"],["champagne gold","#f0d080"],["champagne pink","#f0d8c8"],
+  /* ── Materials as adjectives ── */
+  ["leather brown","#8b4513"],["denim blue","#1560bd"],["velvet purple","#720058"],
+  ["linen white","#faf0e6"],["cotton white","#f8f8f8"],["silk white","#f0e8d8"],
+  ["concrete grey","#9b9b8b"],["cement grey","#909080"],["asphalt grey","#404040"],
+  ["terracotta orange","#e2725b"],["terracotta red","#c86040"],
+  /* ── Foods as adjectives ── */
+  ["chocolate brown","#7b3f00"],["caramel brown","#c68642"],["honey gold","#ffc200"],
+  ["mustard yellow","#ffdb58"],["olive oil","#8a8040"],["coffee brown","#6b4226"],
+  ["cream white","#fffdd0"],["butter yellow","#f9e076"],["peach orange","#ffcba4"],
+  ["tomato red","#ff6347"],["cherry red","#de3163"],["berry purple","#6f2da8"],
+  ["sage green","#77a373"],["basil green","#208b00"],["mint fresh","#98fb98"],
+  /* ── Sky/weather adjectives ── */
+  ["overcast","#a0a0a0"],["stormy","#4a4a5a"],["rainy","#8090a0"],["sunny","#ffe066"],
+  ["hazy blue","#a0b8c8"],["hazy grey","#b0b0b0"],["hazy white","#e8e8e8"],
+  /* ── Generic nouns kept for backwards compatibility ── */
+  ["sky","#87ceeb"],["grass","#4a7c3f"],["leaf","#228b22"],["leaves","#228b22"],
+  ["forest","#228b22"],["jungle","#1a6a1a"],["moss","#6b8e23"],["fern","#4f7942"],
+  ["pine","#016951"],["lavender","#e6e6fa"],["lilac","#c8a2c8"],["rose","#ff3366"],
+  ["tulip","#ff6080"],["daffodil","#ffec00"],["sunflower","#ffc83c"],["daisy","#fff8e1"],
+  ["cherry blossom","#ffb7c5"],["wisteria","#9b7ec8"],["orchid","#da70d6"],
+  ["ocean","#006994"],["sea","#006994"],["beach","#f5deb3"],["sand","#f4a460"],
+  ["river","#4a90a0"],["lake","#5a8090"],["coral","#ff7f50"],
+  ["mud","#6b4c3a"],["clay","#8b4513"],["rock","#808080"],["stone","#909090"],
+  ["marble","#e8e8e8"],["slate","#708090"],["chalk","#f0f0f0"],["obsidian","#1c1c1c"],
+  ["coal","#1a1a1a"],["ash","#b8b8b8"],["lava","#cc3300"],["earth","#8b4513"],
+  ["soil","#6b3a2a"],["dirt","#7a4a30"],["desert","#e8c068"],["canyon","#c07040"],
+  ["mountain","#808870"],["glacier","#b8dde8"],["cave","#302820"],
+  ["lemon","#fff44f"],["lime","#97ce4c"],["orange","#ff8c00"],["mango","#ffad00"],
+  ["banana","#ffe135"],["peach","#ffcba4"],["apricot","#fbceb1"],["plum","#8e4585"],
+  ["grape","#6f2da8"],["cherry","#de3163"],["strawberry","#fc5a8d"],["raspberry","#e30b5c"],
+  ["blueberry","#4f86c6"],["blackberry","#4a0040"],["watermelon","#fc6c85"],
+  ["kiwi","#8ee53f"],["avocado","#568203"],["pineapple","#f4c430"],["papaya","#ffa07a"],
+  ["fig","#7b3f58"],["tomato","#ff6347"],["carrot","#ed9121"],["pumpkin","#ff7518"],
+  ["beetroot","#8b0050"],["aubergine","#614051"],["eggplant","#614051"],
+  ["mushroom","#b5a28a"],["potato","#c8a878"],["corn","#fbec5d"],["wheat","#f5deb3"],
+  ["coffee","#6b4226"],["espresso","#4a2800"],["latte","#c09060"],["tea","#b5651d"],
+  ["matcha","#507832"],["chocolate","#7b3f00"],["caramel","#c68642"],["honey","#ffc200"],
+  ["mustard","#ffdb58"],["wine","#722f37"],["beer","#f0a000"],["whisky","#c07530"],
+  ["milk","#f8f8f0"],["cream","#fffdd0"],["butter","#f9e076"],["cheese","#f4c430"],
+  ["bread","#c8a050"],["toast","#b87040"],
+  ["denim","#1560bd"],["leather","#8b4513"],["suede","#b8784c"],["silk","#f0e8d8"],
+  ["linen","#faf0e6"],["cotton","#f8f8f8"],["wool","#f0e0c0"],["canvas","#f0d8a0"],
+  ["wood","#a0522d"],["oak","#c09060"],["mahogany","#c04000"],["walnut","#78402a"],
+  ["ebony","#3d2b1f"],["birch","#d0b890"],["brick","#cb4154"],["concrete","#9b9b8b"],
+  ["terracotta","#e2725b"],["porcelain","#f0ece4"],["glass","#b0c8d0"],
+  ["steel","#a0a8b0"],["iron","#6a6a7a"],["rust","#b7410e"],["copper","#b87333"],
+  ["brass","#b5a642"],["bronze","#cd7f32"],["gold","#ffd700"],["silver","#c0c0c0"],
+  ["flamingo","#fc8eac"],["peacock","#006a4e"],["parrot","#50c040"],["canary","#ffef00"],
+  ["tiger","#f97316"],["fox","#d2691e"],["deer","#c08040"],
+  ["ruby","#9b111e"],["emerald","#50c878"],["sapphire","#0f52ba"],["amethyst","#9966cc"],
+  ["topaz","#ffc87c"],["pearl","#f0ece4"],["jade","#00a36c"],
+  ["spring","#90ee90"],["summer","#ffd700"],["autumn","#d2691e"],["fall","#d2691e"],["winter","#b0c4de"],
+  ["cinnamon","#7b3f00"],["vanilla","#f3e5ab"],["saffron","#f4a000"],["paprika","#cc4400"],
+];
+
+/* ── Colour Math ── */
+function hexToRgb(h){const x=h.replace('#','');return[parseInt(x.slice(0,2),16),parseInt(x.slice(2,4),16),parseInt(x.slice(4,6),16)];}
+function rgbToHex(r,g,b){return'#'+[r,g,b].map(x=>x.toString(16).padStart(2,'0')).join('');}
+function cdist(r1,g1,b1,r2,g2,b2){const dr=r1-r2,dg=g1-g2,db=b1-b2,rm=(r1+r2)/2;return Math.sqrt((2+rm/256)*dr*dr+4*dg*dg+(2+(255-rm)/256)*db*db);}
+function nearestXKCD(r,g,b){let best=null,bd=Infinity;for(const c of XKCD){const d=cdist(r,g,b,c[0],c[1],c[2]);if(d<bd){bd=d;best=c;}}return{match:best,dist:bd};}
+function nearestRAL(r,g,b){let best=null,bd=Infinity;for(const c of RAL){const d=cdist(r,g,b,c[0],c[1],c[2]);if(d<bd){bd=d;best=c;}}return best;}
+function rgbToHsl(r,g,b){r/=255;g/=255;b/=255;const mx=Math.max(r,g,b),mn=Math.min(r,g,b);let h=0,s=0,l=(mx+mn)/2;if(mx!==mn){const d=mx-mn;s=l>0.5?d/(2-mx-mn):d/(mx+mn);switch(mx){case r:h=((g-b)/d+(g<b?6:0))/6;break;case g:h=((b-r)/d+2)/6;break;case b:h=((r-g)/d+4)/6;break;}}return[Math.round(h*360),Math.round(s*100),Math.round(l*100)];}
+function rgbToCmyk(r,g,b){if(!r&&!g&&!b)return[0,0,0,100];const rp=r/255,gp=g/255,bp=b/255,k=1-Math.max(rp,gp,bp);return[Math.round(((1-rp-k)/(1-k))*100),Math.round(((1-gp-k)/(1-k))*100),Math.round(((1-bp-k)/(1-k))*100),Math.round(k*100)];}
+
+function classify(hex,mrgb,d){
+  const[sr,sg,sb]=hexToRgb(hex);
+  const[sh,ss,sl]=rgbToHsl(sr,sg,sb);
+  const[mh,ms,ml]=rgbToHsl(mrgb[0],mrgb[1],mrgb[2]);
+  const ld=sl-ml,sd=ss-ms;
+  if(d<18)return{type:"Pure Match",tip:"Start with this colour directly on your palette — it's a very close match."};
+  if(ld>8&&sd>-12)return{type:"Tint",tip:"Mix the named colour with white. The lighter it needs to be, the more white you add."};
+  if(ld<-8&&sd>-12)return{type:"Shade",tip:"Mix the named colour with black or a dark neutral. Add sparingly — a little goes a long way."};
+  if(sd<-12&&Math.abs(ld)<8)return{type:"Tone",tip:"Mix the named colour with grey (or its complement) to desaturate without changing lightness."};
+  if(ld>8&&sd<-12)return{type:"Tint + Tone",tip:"Lighten with white, then knock back chroma with a touch of grey."};
+  if(ld<-8&&sd<-12)return{type:"Shade + Tone",tip:"Darken with black, then desaturate with grey or the colour's complement."};
+  return{type:"Variation",tip:"A hue shift from the named colour — adjust with neighbouring pigments on your palette."};
+}
+
+/* ── Word/phrase lookup — prioritises longest exact match ── */
+function lookupWord(query){
+  const q=query.toLowerCase().trim();
+
+  // 1. Exact match in WORDS table
+  for(const[k,h]of WORDS)if(q===k)return h;
+
+  // 2. Exact match in XKCD names
+  for(const c of XKCD)if(c[3]===q)return rgbToHex(c[0],c[1],c[2]);
+
+  // 3. Best partial match in WORDS (longest key that appears in query or vice versa)
+  let best=null,bestLen=0;
+  for(const[k,h]of WORDS){
+    if((q.includes(k)||k.includes(q))&&k.length>bestLen){bestLen=k.length;best=h;}
+  }
+  if(best)return best;
+
+  // 4. Individual word hits against WORDS table
+  const words=q.split(/\s+/);
+  for(const w of words){
+    if(w.length<3)continue;
+    for(const[k,h]of WORDS)if(k.includes(w)||w.includes(k))return h;
+  }
+
+  // 5. Partial match against XKCD names
+  for(const c of XKCD){if(c[3].includes(q)||q.includes(c[3]))return rgbToHex(c[0],c[1],c[2]);}
+  for(const w of words){
+    if(w.length<3)continue;
+    for(const c of XKCD)if(c[3].includes(w))return rgbToHex(c[0],c[1],c[2]);
+  }
+
+  return null;
+}
+
+/* ── DOM ── */
+const swatch=document.getElementById('swatch');
+const compareSwatch=document.getElementById('compare-swatch');
+const sampledHexEl=document.getElementById('sampled-hex');
+const valRgb=document.getElementById('val-rgb');
+const valHsl=document.getElementById('val-hsl');
+const valCmyk=document.getElementById('val-cmyk');
+const colourNameEl=document.getElementById('colour-name');
+const xkcdHexEl=document.getElementById('xkcd-hex');
+const ralNameEl=document.getElementById('ral-name');
+const ralCodeEl=document.getElementById('ral-code');
+const mixBadge=document.getElementById('mix-badge');
+const mixTip=document.getElementById('mix-tip');
+const chipRow=document.getElementById('chip-row');
+const statusBar=document.getElementById('status-bar');
+const modeBtns=document.querySelectorAll('.mode-btn');
+const panelCamera=document.getElementById('panel-camera');
+const panelDescribe=document.getElementById('panel-describe');
+const panelHex=document.getElementById('panel-hex');
+const cameraFeed=document.getElementById('camera-feed');
+const streamImg=document.getElementById('stream-img'); // NEW (v1l)
+const crosshair=document.getElementById('crosshair');
+const crosshairRing=document.getElementById('crosshair-ring');
+const sampleCanvas=document.getElementById('sample-canvas');
+const btnCapture=document.getElementById('btn-capture');
+const describeInput=document.getElementById('describe-input');
+const describeGo=document.getElementById('describe-go');
+const hexPicker=document.getElementById('hex-picker');
+const hexInput=document.getElementById('hex-input');
+const hexGo=document.getElementById('hex-go');
+// NEW (v1l): network camera source elements
+const cameraSourceRow=document.getElementById('camera-source-row');
+const sourceToggleBtn=document.getElementById('source-toggle-btn');
+const sourceTypeSelect=document.getElementById('source-type-select');
+const streamAddressInput=document.getElementById('stream-address');
+const streamConnectBtn=document.getElementById('stream-connect-btn');
+let currentMode='camera',cameraStream=null,currentHex='#a2cffe';
+// NEW (v1l): which picture source is active. 'browser' = original
+// getUserMedia path (unchanged). 'ipwebcam'/'droidcam' = MJPEG <img>
+// stream from that Android app, same mechanism used in gridli_pov to
+// route around Brave/Android blocking getUserMedia on file:// pages.
+let currentSourceType='browser',streamShouldReconnect=false,streamRetryTimeout=null;
+
+function applyColour(hex){
+  hex=hex.toLowerCase();currentHex=hex;
+  const[r,g,b]=hexToRgb(hex);
+  const{match,dist:d}=nearestXKCD(r,g,b);
+  const ral=nearestRAL(r,g,b);
+  const[h,s,l]=rgbToHsl(r,g,b);
+  const[c,m,y,k]=rgbToCmyk(r,g,b);
+  const mhex=rgbToHex(match[0],match[1],match[2]);
+  const rel=classify(hex,[match[0],match[1],match[2]],d);
+  swatch.style.backgroundColor=hex;
+  swatch.classList.remove('pop');void swatch.offsetWidth;swatch.classList.add('pop');
+  compareSwatch.style.backgroundColor=mhex;
+  sampledHexEl.textContent=hex.toUpperCase();
+  valRgb.textContent=`RGB — ${r}, ${g}, ${b}`;
+  valHsl.textContent=`HSL — ${h}°  ${s}%  ${l}%`;
+  valCmyk.textContent=`CMYK — ${c}, ${m}, ${y}, ${k}`;
+  colourNameEl.textContent=match[3];
+  xkcdHexEl.textContent=mhex.toUpperCase();
+  ralNameEl.textContent=ral[4];
+  ralCodeEl.textContent=ral[3];
+  mixBadge.textContent=rel.type;
+  mixTip.textContent=rel.tip;
+  chipRow.innerHTML='';
+  addChip(family(match[3],h,s,l));
+  addChip('Δ '+Math.round(d));
+  setStatus('');
+}
+
+function family(name,h,s,l){
+  const n=name.toLowerCase();
+  for(const f of['red','orange','yellow','green','blue','purple','pink','brown','grey','gray','white','black','teal','cyan','violet','indigo','lavender','magenta','navy','olive','coral','salmon','aqua','lime'])if(n.includes(f))return f;
+  if(s<10)return l>80?'white':l<20?'black':'grey';
+  if(h<15||h>=345)return'red';if(h<40)return'orange';if(h<65)return'yellow';
+  if(h<165)return'green';if(h<200)return'cyan';if(h<265)return'blue';if(h<290)return'purple';return'pink';
+}
+function addChip(t){const c=document.createElement('span');c.className='chip';c.textContent=t;chipRow.appendChild(c);}
+function setStatus(m){statusBar.textContent=m;}
+
+modeBtns.forEach(btn=>{
+  btn.addEventListener('click',()=>{
+    const mode=btn.dataset.mode;
+    if(mode===currentMode)return;
+    currentMode=mode;
+    modeBtns.forEach(b=>b.classList.remove('active'));
+    btn.classList.add('active');
+    panelCamera.style.display='none';panelDescribe.style.display='none';panelHex.style.display='none';
+    if(mode==='camera'){
+      panelCamera.style.display='flex';
+      crosshair.classList.add('active');crosshairRing.classList.add('active');
+      switchSourceType(currentSourceType); // NEW (v1l): re-activates whichever source was last selected
+    }else{
+      cameraFeed.classList.remove('active');crosshair.classList.remove('active');crosshairRing.classList.remove('active');
+      stopCamera();
+      stopNetworkStream(); // NEW (v1l): also tear down any live MJPEG stream/retry loop
+      if(mode==='describe'){panelDescribe.style.display='flex';setTimeout(()=>describeInput.focus(),120);}
+      else{panelHex.style.display='flex';hexInput.value=currentHex;hexPicker.value=currentHex;}
+    }
+    setStatus('');
+  });
+});
+
+async function initCamera(){
+  if(cameraStream)return;
+  try{
+    cameraStream=await navigator.mediaDevices.getUserMedia({video:{facingMode:{ideal:'environment'},width:{ideal:1280}},audio:false});
+    cameraFeed.srcObject=cameraStream;
+    cameraFeed.classList.add('active');crosshair.classList.add('active');crosshairRing.classList.add('active');
+  }catch(e){
+    setStatus('Camera unavailable — use Describe or Hex mode, or try 📡 Source below.');
+    cameraFeed.classList.remove('active');crosshair.classList.remove('active');crosshairRing.classList.remove('active');
+  }
+}
+function stopCamera(){if(cameraStream){cameraStream.getTracks().forEach(t=>t.stop());cameraStream=null;}}
+
+// ════════════════════════════════════════════════════════════════
+// NEW (v1l): network camera source (IP Webcam / DroidCam)
+// Same mechanism as gridli_pov v4 — a plain <img> loading an MJPEG
+// stream from an app running on the phone. No getUserMedia call is
+// made, so Brave/Android's insecure-origin blocking (the wall hit
+// debugging gridli_pov on file:// pages) never applies to this path.
+//
+// Sampling note: chromia always samples the dead-center pixel of the
+// active source's NATIVE resolution (see btnCapture handler below).
+// Because #camera-feed/#stream-img use object-fit:cover, any crop is
+// symmetric around the center — unlike gridli_pov's movable crop-box,
+// there is no position/aspect mismatch to correct for here, so this
+// does NOT need the getVisibleVideoRect() letterbox-fix that gridli_pov
+// required. Only the source element changes; the sampling math itself
+// does not.
+// ════════════════════════════════════════════════════════════════
+function getActiveMediaElement(){
+  return currentSourceType==='browser' ? cameraFeed : streamImg;
+}
+function getActiveMediaDimensions(){
+  if(currentSourceType==='browser') return {width:cameraFeed.videoWidth,height:cameraFeed.videoHeight};
+  return {width:streamImg.naturalWidth,height:streamImg.naturalHeight};
+}
+function resolveStreamUrl(type,base){
+  const cleanBase=base.replace(/\/$/,'');
+  if(type==='droidcam') return `${cleanBase}/mjpegfeed`;
+  return `${cleanBase}/video`; // ipwebcam default
+}
+function normalizeAddress(raw){
+  let addr=raw.trim();
+  if(!addr) return '';
+  if(!/^https?:\/\//i.test(addr)) addr=`http://${addr}`;
+  return addr;
+}
+function stopNetworkStream(){
+  streamShouldReconnect=false;
+  if(streamRetryTimeout){clearTimeout(streamRetryTimeout);streamRetryTimeout=null;}
+  streamImg.src='';
+  streamImg.classList.remove('active');
+}
+function connectNetworkStream(){
+  const type=sourceTypeSelect.value;
+  const base=normalizeAddress(streamAddressInput.value);
+  if(!base){setStatus('Enter an address first, e.g. 192.168.1.42:8080');return;}
+  const url=resolveStreamUrl(type,base);
+  streamShouldReconnect=true;
+  setStatus('Connecting…');
+  streamImg.classList.add('active');
+  crosshair.classList.add('active');crosshairRing.classList.add('active');
+  streamImg.src=`${url}?t=${Date.now()}`;
+}
+streamImg.addEventListener('load',()=>{
+  if(currentSourceType==='browser')return;
+  setStatus('');
+});
+streamImg.addEventListener('error',()=>{
+  if(currentSourceType==='browser'||!streamShouldReconnect)return;
+  setStatus('Stream lost — retrying…');
+  streamRetryTimeout=setTimeout(()=>{
+    if(!streamShouldReconnect)return;
+    const current=streamImg.src.split('?')[0];
+    streamImg.src=`${current}?t=${Date.now()}`;
+  },2000);
+});
+function switchSourceType(type){
+  currentSourceType=type;
+  setStatus('');
+  if(type==='browser'){
+    stopNetworkStream();
+    streamAddressInput.disabled=true;
+    streamConnectBtn.disabled=true;
+    initCamera();
+  }else{
+    stopCamera();
+    cameraFeed.classList.remove('active');
+    streamAddressInput.disabled=false;
+    streamConnectBtn.disabled=false;
+    streamAddressInput.placeholder = type==='droidcam' ? '192.168.1.42:4747' : '192.168.1.42:8080';
+    setStatus('Enter the address shown in the app, then tap Go.');
+  }
+}
+sourceToggleBtn.addEventListener('click',()=>{
+  cameraSourceRow.style.display = (cameraSourceRow.style.display==='none') ? 'flex' : 'none';
+});
+sourceTypeSelect.addEventListener('change',()=>{switchSourceType(sourceTypeSelect.value);});
+
+// Remember the last-used network address between sessions. Purely
+// additive convenience — does not change which source is active on
+// load, that always starts on Browser Camera unless switched manually.
+try{
+  const savedStreamCfg=JSON.parse(localStorage.getItem('chromiaStreamConfig')||'null');
+  if(savedStreamCfg&&savedStreamCfg.address){
+    streamAddressInput.value=savedStreamCfg.address;
+    if(savedStreamCfg.type)sourceTypeSelect.value=savedStreamCfg.type;
+  }
+}catch(e){ /* ignore malformed storage */ }
+function saveStreamConfig(){
+  try{
+    localStorage.setItem('chromiaStreamConfig',JSON.stringify({
+      type:sourceTypeSelect.value,
+      address:streamAddressInput.value.trim()
+    }));
+  }catch(e){ /* storage unavailable, non-fatal */ }
+}
+streamConnectBtn.addEventListener('click',()=>{saveStreamConfig();connectNetworkStream();});
+streamAddressInput.addEventListener('keydown',e=>{if(e.key==='Enter'){saveStreamConfig();connectNetworkStream();}});
+
+btnCapture.addEventListener('click',()=>{
+  if(currentSourceType==='browser'&&!cameraStream){setStatus('Camera not active.');return;}
+  if(currentSourceType!=='browser'&&!streamShouldReconnect){setStatus('Stream not connected — enter an address and tap Go.');return;}
+  const dims=getActiveMediaDimensions();
+  const vw=dims.width,vh=dims.height;
+  if(!vw||!vh){setStatus('Camera not ready — try again.');return;}
+  sampleCanvas.width=vw;sampleCanvas.height=vh;
+  const ctx=sampleCanvas.getContext('2d');
+  ctx.drawImage(getActiveMediaElement(),0,0,vw,vh);
+  const cx=Math.floor(vw/2),cy=Math.floor(vh/2),r=12;
+  // Fix: reading pixel data back off a canvas painted from a cross-origin
+  // source (the network-stream <img>, e.g. an IP Webcam/DroidCam feed on
+  // the LAN) throws a SecurityError — the canvas is "tainted" by
+  // cross-origin image data, a hard browser rule that can't be bypassed
+  // client-side without the streaming server sending CORS headers, which
+  // consumer IP-camera apps generally don't. Native browser camera mode
+  // is same-origin and unaffected. Catch it and tell the user plainly
+  // instead of silently doing nothing on Capture.
+  try{
+    applyColour(avgPixels(ctx.getImageData(cx-r,cy-r,r*2,r*2)));
+  }catch(e){
+    setStatus('Color sampling isn\'t available from network camera streams (a browser security restriction) — switch to Browser camera mode, or use Describe/Hex instead.');
+  }
+});
+function avgPixels(id){let r=0,g=0,b=0,n=id.data.length/4;for(let i=0;i<id.data.length;i+=4){r+=id.data[i];g+=id.data[i+1];b+=id.data[i+2];}return rgbToHex(Math.round(r/n),Math.round(g/n),Math.round(b/n));}
+
+describeGo.addEventListener('click',runDescribe);
+describeInput.addEventListener('keydown',e=>{if(e.key==='Enter')runDescribe();});
+function runDescribe(){
+  const q=describeInput.value.trim();
+  if(!q){setStatus('Type a word, phrase, or description.');return;}
+  const hex=lookupWord(q);
+  if(hex)applyColour(hex);
+  else setStatus(`No match for "${q}" — try different words.`);
+}
+
+hexPicker.addEventListener('input',()=>{hexInput.value=hexPicker.value;applyColour(hexPicker.value);});
+hexGo.addEventListener('click',runHex);
+hexInput.addEventListener('keydown',e=>{if(e.key==='Enter')runHex();});
+hexInput.addEventListener('input',()=>{let v=hexInput.value.trim();if(!v.startsWith('#'))v='#'+v;if(/^#[0-9a-fA-F]{6}$/.test(v))hexPicker.value=v;});
+function runHex(){let v=hexInput.value.trim();if(!v.startsWith('#'))v='#'+v;if(!/^#[0-9a-fA-F]{6}$/.test(v)){setStatus('Enter a valid hex e.g. #3a7bd5');return;}hexPicker.value=v;applyColour(v);}
+
+panelDescribe.style.display='none';
+panelHex.style.display='none';
+applyColour(currentHex);
+switchSourceType(currentSourceType); // NEW (v1l): single canonical init path (was a direct initCamera() call)
+</script>
+</body>
+</html>
